@@ -460,14 +460,29 @@ async function submitMileage(){
   const val = parseInt(input.value, 10);
   if(!val || val <= 0){ toast('Enter a valid mileage', true); return; }
   if(!currentVehicle) return;
+
+  const priorMileage = currentLatestMileage || currentVehicle.current_mileage;
+  if(priorMileage && val < priorMileage){
+    toast(`Mileage can't be lower than the last reading (${priorMileage.toLocaleString()} km)`, true);
+    return;
+  }
+
   try{
     await fetch(`${SUPABASE_URL}/rest/v1/fleet_mileage_log`, {
       method:'POST', headers:{...headers, 'Content-Type':'application/json', Prefer:'return=minimal'},
       body: JSON.stringify({vehicle_id: currentVehicle.id, mileage: val, reported_by:'public_lookup'})
     });
+
+    const patchBody = { current_mileage: val, updated_at: new Date().toISOString() };
+    // First-ever mileage report becomes the service baseline automatically.
+    if(!currentVehicle.last_service_mileage){
+      patchBody.last_service_mileage = val;
+      patchBody.last_service_date = new Date().toISOString().slice(0,10);
+    }
+
     await fetch(`${SUPABASE_URL}/rest/v1/fleet_vehicles?id=eq.${currentVehicle.id}`, {
       method:'PATCH', headers:{...headers, 'Content-Type':'application/json', Prefer:'return=minimal'},
-      body: JSON.stringify({current_mileage: val, updated_at: new Date().toISOString()})
+      body: JSON.stringify(patchBody)
     });
     toast('Mileage updated');
     doSearch();
@@ -575,10 +590,14 @@ async function openVehicle(id){
       ${fieldRow('Insurance Expiry','insurance_expiry','date')} ${fieldRow('Fitness Expiry','fitness_expiry','date')}
       ${fieldRow('Registration Expiry','registration_expiry','date')} ${fieldRow('Carriers License Expiry','carriers_license_expiry','date')}
     </div>
-    <div class="section-title">Service</div>
+    <div class="section-title">Service <span style="opacity:.6; text-transform:none; letter-spacing:0; font-weight:400;">(5,000 km / 6 months, whichever first)</span></div>
     <div class="form-grid">
       ${fieldRow('Next Service Date','next_service_date','date')} ${fieldRow('Service Interval (km)','service_interval_km','number')}
       ${fieldRow('Last Service Mileage','last_service_mileage','number')} ${fieldRow('Last Service Date','last_service_date','date')}
+    </div>
+    <div style="margin:-8px 0 8px;">
+      <button class="btn small ghost" onclick="markServiced('${v.id}')">Mark as Serviced Today</button>
+      <span style="font-size:11.5px; color:var(--muted); margin-left:8px;">Resets the interval using current mileage${v.current_mileage ? ` (${v.current_mileage.toLocaleString()} km)` : ''} and today's date.</span>
     </div>
     ${docs.length ? `
     <div class="section-title">Uploaded Documents (${docs.length})</div>
@@ -610,6 +629,30 @@ async function approveDoc(docId, vehicleId){
   });
   await loadAll();
   openVehicle(vehicleId);
+}
+
+async function markServiced(id){
+  const v = vehicles.find(x=>x.id===id);
+  if(!v) return;
+  const today = new Date().toISOString().slice(0,10);
+  const nextDate = new Date();
+  nextDate.setMonth(nextDate.getMonth() + (v.service_interval_months || 6));
+  const payload = {
+    last_service_date: today,
+    last_service_mileage: v.current_mileage || v.last_service_mileage || null,
+    next_service_date: nextDate.toISOString().slice(0,10),
+    updated_at: new Date().toISOString(),
+  };
+  await fetch(`${SUPABASE_URL}/rest/v1/fleet_vehicles?id=eq.${id}`, {
+    method:'PATCH', headers:{...headers,'Content-Type':'application/json',Prefer:'return=minimal'}, body: JSON.stringify(payload)
+  });
+  await fetch(`${SUPABASE_URL}/rest/v1/fleet_service_log`, {
+    method:'POST', headers:{...headers,'Content-Type':'application/json',Prefer:'return=minimal'},
+    body: JSON.stringify({ vehicle_id: id, service_date: today, mileage_at_service: v.current_mileage || null, logged_by: 'admin_dashboard' })
+  });
+  await loadAll();
+  openVehicle(id);
+  toast('Marked as serviced \u2014 interval reset');
 }
 
 async function saveVehicle(id){
