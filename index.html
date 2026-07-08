@@ -211,6 +211,11 @@
       <option value="soon">Due soon</option>
       <option value="ok">All clear</option>
     </select>
+    <select id="sortBy">
+      <option value="reg_number">Sort: Reg Number</option>
+      <option value="driver_name">Sort: Driver</option>
+      <option value="department">Sort: Department</option>
+    </select>
     <button class="btn ghost" id="refreshBtn">Refresh</button>
   </div>
   <div id="tableWrap"><div class="loading">Loading vehicles…</div></div>
@@ -509,10 +514,18 @@ function renderStats(pendingCount){
 function renderTable(){
   const q = document.getElementById('search').value.trim().toLowerCase();
   const filter = document.getElementById('filterStatus').value;
+  const sortKey = document.getElementById('sortBy').value;
   let rows = vehicles.filter(v=>{
     const matchesQ = !q || [v.reg_number,v.driver_name,v.department,v.make,v.model].join(' ').toLowerCase().includes(q);
     const matchesF = !filter || overallStatus(v)===filter;
     return matchesQ && matchesF;
+  });
+  rows = rows.slice().sort((a,b)=>{
+    const av = (a[sortKey] || '').toString().toLowerCase();
+    const bv = (b[sortKey] || '').toString().toLowerCase();
+    if(!av && bv) return 1;
+    if(av && !bv) return -1;
+    return av.localeCompare(bv) || a.reg_number.localeCompare(b.reg_number);
   });
   if(!rows.length){
     document.getElementById('tableWrap').innerHTML = '<div class="empty">No vehicles match your filters.</div>';
@@ -663,6 +676,7 @@ async function createVehicle(){
 
 document.getElementById('search').addEventListener('input', renderTable);
 document.getElementById('filterStatus').addEventListener('change', renderTable);
+document.getElementById('sortBy').addEventListener('change', renderTable);
 document.getElementById('refreshBtn').addEventListener('click', loadAll);
 document.getElementById('addVehicleBtn').addEventListener('click', openAddVehicle);
 document.getElementById('modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') closeModal(); });
